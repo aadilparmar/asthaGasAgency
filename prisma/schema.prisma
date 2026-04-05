@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  password  String
+  name      String
+  createdAt DateTime @default(now())
+}
+
+model Employee {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // 'delivery' | 'office'
+  rate        Float    @default(0)
+  fixedSalary Float    @default(0)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  deliveries DailyDelivery[]
+  loans      LoanTransaction[]
+  deductions MonthlyDeduction[]
+}
+
+model DailyDelivery {
+  id         String   @id @default(cuid())
+  employeeId String
+  date       DateTime
+  count      Int      @default(0)
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, date])
+}
+
+model LoanTransaction {
+  id         String   @id @default(cuid())
+  employeeId String
+  amount     Float
+  month      Int
+  year       Int
+  note       String   @default("")
+  createdAt  DateTime @default(now())
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+}
+
+model MonthlyDeduction {
+  id         String   @id @default(cuid())
+  employeeId String
+  month      Int
+  year       Int
+  type       String   // 'pf' | 'loan_instalment' | 'upad_1' | 'upad_15' | 'upad_other'
+  amount     Float    @default(0)
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, month, year, type])
+}
