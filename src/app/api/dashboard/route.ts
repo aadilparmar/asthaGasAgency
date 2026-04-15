@@ -43,7 +43,7 @@ export async function GET(request: NextRequest) {
     }),
   ]);
 
-  // Daily delivery trend for the month
+  // Daily delivery trend for the month (sum across all cylinder types)
   const dailyTrend = await prisma.dailyDelivery.groupBy({
     by: ["date"],
     where: { date: { gte: startDate, lte: endDate } },
@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
     orderBy: { date: "asc" },
   });
 
-  // Top performers
+  // Top performers (sum across all cylinder types)
   const topPerformers = await prisma.dailyDelivery.groupBy({
     by: ["employeeId"],
     where: {

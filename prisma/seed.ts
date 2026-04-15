@@ -57,6 +57,36 @@ async function main() {
   } else {
     console.log(`${employeeCount} employees already exist`);
   }
+
+  // Seed cylinder types
+  const cylinderCount = await prisma.cylinderType.count();
+  if (cylinderCount === 0) {
+    const types = [
+      { name: "14.2 KG", price: 15.5, sortOrder: 0 },
+      { name: "19 KG", price: 21, sortOrder: 1 },
+      { name: "5 KG", price: 10, sortOrder: 2 },
+      { name: "47.5 KG", price: 25, sortOrder: 3 },
+    ];
+    for (const ct of types) {
+      await prisma.cylinderType.create({ data: ct });
+    }
+    console.log(`Seeded ${types.length} cylinder types`);
+  } else {
+    console.log(`${cylinderCount} cylinder types already exist`);
+  }
+
+  // Seed OTP bonus setting
+  const otpSetting = await prisma.appSetting.findUnique({
+    where: { key: "otp_bonus" },
+  });
+  if (!otpSetting) {
+    await prisma.appSetting.create({
+      data: { key: "otp_bonus", value: "2" },
+    });
+    console.log("OTP bonus setting created: ₹2");
+  } else {
+    console.log(`OTP bonus setting exists: ₹${otpSetting.value}`);
+  }
 }
 
 main()

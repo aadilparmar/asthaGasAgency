@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import MonthSelector from "@/components/MonthSelector";
+import CalendarPicker from "@/components/CalendarPicker";
+import CustomSelect from "@/components/CustomSelect";
 import Modal from "@/components/Modal";
 import Toast from "@/components/Toast";
 import { formatCurrency, getMonthName, cn } from "@/lib/utils";
@@ -322,7 +323,7 @@ export default function LoansPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <MonthSelector month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y); }} />
+          <CalendarPicker month={month} year={year} onMonthChange={(m, y) => { setMonth(m); setYear(y); }} />
           <button
             onClick={() => setPaymentModalOpen(true)}
             className="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-medium rounded-lg hover:bg-emerald-100 transition flex items-center gap-2"
@@ -863,19 +864,18 @@ export default function LoansPage() {
         <form onSubmit={handleAddLoan} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Employee</label>
-            <select
+            <CustomSelect
+              options={[
+                { value: "", label: "Select employee..." },
+                ...employees.map((emp) => ({
+                  value: emp.id,
+                  label: `${emp.name} (${emp.type === "delivery" ? "Delivery" : "Office"})`,
+                })),
+              ]}
               value={formEmployeeId}
-              onChange={(e) => setFormEmployeeId(e.target.value)}
-              required
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none bg-white transition"
-            >
-              <option value="">Select employee...</option>
-              {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
-                  {emp.name} ({emp.type === "delivery" ? "Delivery" : "Office"})
-                </option>
-              ))}
-            </select>
+              onChange={setFormEmployeeId}
+              placeholder="Select employee..."
+            />
           </div>
 
           {selectedLoanEmpData && (
@@ -946,23 +946,22 @@ export default function LoansPage() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Employee</label>
-            <select
+            <CustomSelect
+              options={[
+                { value: "", label: "Select employee..." },
+                ...employees.map((emp) => {
+                  const empData = salaryData.find((s) => s.employee.id === emp.id);
+                  const balance = empData?.netLoan || 0;
+                  return {
+                    value: emp.id,
+                    label: `${emp.name}${balance > 0 ? ` — Loan: ${formatCurrency(balance)}` : ""}`,
+                  };
+                }),
+              ]}
               value={payEmpId}
-              onChange={(e) => setPayEmpId(e.target.value)}
-              required
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none bg-white transition"
-            >
-              <option value="">Select employee...</option>
-              {employees.map((emp) => {
-                const empData = salaryData.find((s) => s.employee.id === emp.id);
-                const balance = empData?.netLoan || 0;
-                return (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} {balance > 0 ? `— Loan: ${formatCurrency(balance)}` : ""}
-                  </option>
-                );
-              })}
-            </select>
+              onChange={setPayEmpId}
+              placeholder="Select employee..."
+            />
           </div>
 
           {selectedPayEmpData && (

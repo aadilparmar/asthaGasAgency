@@ -1,14 +1,28 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import MonthSelector from "@/components/MonthSelector";
+import CalendarPicker from "@/components/CalendarPicker";
 import Toast from "@/components/Toast";
 import { getDaysInMonth, getMonthName, formatCurrency, cn } from "@/lib/utils";
 
 interface Employee {
   id: string;
   name: string;
-  rate: number;
+}
+
+interface CylinderType {
+  id: string;
+  name: string;
+  price: number;
+  active: boolean;
+}
+
+interface DeliveryEntry {
+  employeeId: string;
+  date: string;
+  cylinderTypeId: string;
+  count: number;
+  otpCount: number;
 }
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -21,6 +35,9 @@ export default function DailyEntryPage() {
   const [selectedDay, setSelectedDay] = useState(now.getDate());
   const [view, setView] = useState<"day" | "grid">("day");
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [cylinderTypes, setCylinderTypes] = useState<CylinderType[]>([]);
+  const [otpBonus, setOtpBonus] = useState(2);
+  // grid keys: `${day}_${employeeId}_${cylinderTypeId}_count` and `..._otp`
   const [grid, setGrid] = useState<Record<string, number>>({});
   const [original, setOriginal] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -29,8 +46,10 @@ export default function DailyEntryPage() {
   const toastTimeout = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const daysInMonth = useMemo(() => getDaysInMonth(month, year), [month, year]);
+  const activeTypes = useMemo(() => cylinderTypes.filter((t) => t.active), [cylinderTypes]);
 
-  const cellKey = (day: number, employeeId: string) => `${day}_${employeeId}`;
+  const countKey = (day: number, empId: string, ctId: string) => `${day}_${empId}_${ctId}_count`;
+  const otpKey = (day: number, empId: string, ctId: string) => `${day}_${empId}_${ctId}_otp`;
 
   const showToast = useCallback((type: "success" | "error", message: string) => {
     if (toastTimeout.current) clearTimeout(toastTimeout.current);
@@ -41,21 +60,36 @@ export default function DailyEntryPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, delRes] = await Promise.all([
+      const [empRes, ctRes, delRes, settingsRes] = await Promise.all([
         fetch("/api/employees?type=delivery&active=true"),
+        fetch("/api/cylinder-types"),
         fetch(`/api/daily-deliveries?month=${month}&year=${year}`),
+        fetch("/api/app-settings"),
       ]);
       if (!empRes.ok) throw new Error("Failed to load employees");
 
       const empData = await empRes.json();
       setEmployees(empData);
 
+      const ctData: CylinderType[] = await ctRes.json();
+      setCylinderTypes(ctData);
+
+      const settingsData = await settingsRes.json();
+      setOtpBonus(Number(settingsData.otp_bonus) || 2);
+
       const newGrid: Record<string, number> = {};
       if (delRes.ok) {
-        const delData: { employeeId: string; date: string; count: number }[] = await delRes.json();
+        const delData: {
+          employeeId: string;
+          date: string;
+          cylinderTypeId: string;
+          count: number;
+          otpCount: number;
+        }[] = await delRes.json();
         for (const entry of delData) {
           const d = new Date(entry.date).getDate();
-          newGrid[cellKey(d, entry.employeeId)] = entry.count;
+          newGrid[countKey(d, entry.employeeId, entry.cylinderTypeId)] = entry.count;
+          newGrid[otpKey(d, entry.employeeId, entry.cylinderTypeId)] = entry.otpCount;
         }
       }
       setGrid(newGrid);
@@ -69,36 +103,43 @@ export default function DailyEntryPage() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Cap selectedDay when month changes
   useEffect(() => {
     if (selectedDay > daysInMonth) setSelectedDay(daysInMonth);
   }, [daysInMonth, selectedDay]);
 
   // Changed entries detection
   const getChangedEntries = useCallback(() => {
-    const changes: { employeeId: string; date: string; count: number }[] = [];
+    const changes: DeliveryEntry[] = [];
     for (let day = 1; day <= daysInMonth; day++) {
       for (const emp of employees) {
-        const key = cellKey(day, emp.id);
-        const current = grid[key] || 0;
-        const orig = original[key] || 0;
-        if (current !== orig) {
-          const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-          changes.push({ employeeId: emp.id, date: dateStr, count: current });
+        for (const ct of activeTypes) {
+          const ck = countKey(day, emp.id, ct.id);
+          const ok = otpKey(day, emp.id, ct.id);
+          const currentCount = grid[ck] || 0;
+          const currentOtp = grid[ok] || 0;
+          const origCount = original[ck] || 0;
+          const origOtp = original[ok] || 0;
+          if (currentCount !== origCount || currentOtp !== origOtp) {
+            const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+            changes.push({
+              employeeId: emp.id,
+              date: dateStr,
+              cylinderTypeId: ct.id,
+              count: currentCount,
+              otpCount: currentOtp,
+            });
+          }
         }
       }
     }
     return changes;
-  }, [grid, original, daysInMonth, employees, month, year]);
+  }, [grid, original, daysInMonth, employees, activeTypes, month, year]);
 
   const changedCount = useMemo(() => getChangedEntries().length, [getChangedEntries]);
 
   const handleSave = async () => {
     const changes = getChangedEntries();
-    if (changes.length === 0) {
-      showToast("success", "No changes to save.");
-      return;
-    }
+    if (changes.length === 0) { showToast("success", "No changes to save."); return; }
     setSaving(true);
     try {
       const res = await fetch("/api/daily-deliveries", {
@@ -117,59 +158,58 @@ export default function DailyEntryPage() {
   };
 
   // Day view helpers
-  function setCount(empId: string, value: number) {
-    setGrid(prev => ({ ...prev, [cellKey(selectedDay, empId)]: Math.max(0, value) }));
-  }
-  function increment(empId: string) {
-    setGrid(prev => {
-      const key = cellKey(selectedDay, empId);
-      return { ...prev, [key]: (prev[key] || 0) + 1 };
-    });
-  }
-  function decrement(empId: string) {
-    setGrid(prev => {
-      const key = cellKey(selectedDay, empId);
-      return { ...prev, [key]: Math.max(0, (prev[key] || 0) - 1) };
-    });
+  function setVal(key: string, value: number) {
+    setGrid(prev => ({ ...prev, [key]: Math.max(0, value) }));
   }
 
-  function prevDay() {
-    setSelectedDay(d => Math.max(1, d - 1));
-  }
-  function nextDay() {
-    setSelectedDay(d => Math.min(daysInMonth, d + 1));
+  // Employee day totals
+  function empDayTotal(empId: string, day: number) {
+    let total = 0;
+    for (const ct of activeTypes) {
+      total += grid[countKey(day, empId, ct.id)] || 0;
+    }
+    return total;
   }
 
-  // Computed totals
+  function empDayEarnings(empId: string, day: number) {
+    let earnings = 0;
+    for (const ct of activeTypes) {
+      const count = grid[countKey(day, empId, ct.id)] || 0;
+      const otp = grid[otpKey(day, empId, ct.id)] || 0;
+      earnings += (count * ct.price) + (otp * otpBonus);
+    }
+    return earnings;
+  }
+
+  // Day totals
   const dayTotal = useMemo(() => {
-    return employees.reduce((sum, emp) => sum + (grid[cellKey(selectedDay, emp.id)] || 0), 0);
-  }, [grid, selectedDay, employees]);
+    return employees.reduce((sum, emp) => sum + empDayTotal(emp.id, selectedDay), 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid, selectedDay, employees, activeTypes]);
 
   const dayEarnings = useMemo(() => {
-    return employees.reduce((sum, emp) => {
-      const count = grid[cellKey(selectedDay, emp.id)] || 0;
-      return sum + count * (emp.rate || 0);
-    }, 0);
-  }, [grid, selectedDay, employees]);
+    return employees.reduce((sum, emp) => sum + empDayEarnings(emp.id, selectedDay), 0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid, selectedDay, employees, activeTypes, otpBonus]);
 
+  // Grid view totals
   const grandTotal = useMemo(() => {
     let sum = 0;
     for (let d = 1; d <= daysInMonth; d++) {
       for (const emp of employees) {
-        sum += grid[cellKey(d, emp.id)] || 0;
+        sum += empDayTotal(emp.id, d);
       }
     }
     return sum;
-  }, [grid, daysInMonth, employees]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grid, daysInMonth, employees, activeTypes]);
 
   const rowTotal = (day: number) =>
-    employees.reduce((sum, emp) => sum + (grid[cellKey(day, emp.id)] || 0), 0);
+    employees.reduce((sum, emp) => sum + empDayTotal(emp.id, day), 0);
 
-  const colTotal = (employeeId: string) => {
+  const colTotal = (empId: string) => {
     let sum = 0;
-    for (let d = 1; d <= daysInMonth; d++) {
-      sum += grid[cellKey(d, employeeId)] || 0;
-    }
+    for (let d = 1; d <= daysInMonth; d++) sum += empDayTotal(empId, d);
     return sum;
   };
 
@@ -181,18 +221,64 @@ export default function DailyEntryPage() {
   const isToday = month === now.getMonth() + 1 && year === now.getFullYear() && selectedDay === now.getDate();
   const selectedDow = new Date(year, month - 1, selectedDay).getDay();
 
-  // Day changes count (for day view save button)
+  // Day changes count
   const dayChanges = useMemo(() => {
     let count = 0;
     for (const emp of employees) {
-      const key = cellKey(selectedDay, emp.id);
-      if ((grid[key] || 0) !== (original[key] || 0)) count++;
+      for (const ct of activeTypes) {
+        const ck = countKey(selectedDay, emp.id, ct.id);
+        const ok = otpKey(selectedDay, emp.id, ct.id);
+        if ((grid[ck] || 0) !== (original[ck] || 0) || (grid[ok] || 0) !== (original[ok] || 0)) count++;
+      }
     }
     return count;
-  }, [grid, original, selectedDay, employees]);
+  }, [grid, original, selectedDay, employees, activeTypes]);
+
+  // CSV export
+  function exportCSV(scope: "day" | "month") {
+    const headers = ["Date", "Employee"];
+    for (const ct of activeTypes) {
+      headers.push(`${ct.name} Total`, `${ct.name} OTP`, `${ct.name} Non-OTP`);
+    }
+    headers.push("Total Cylinders", "Earnings");
+
+    const rows: (string | number)[][] = [];
+    const days = scope === "day" ? [selectedDay] : Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+    for (const day of days) {
+      for (const emp of employees) {
+        const row: (string | number)[] = [
+          `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
+          emp.name,
+        ];
+        let totalCyl = 0;
+        let totalEarn = 0;
+        for (const ct of activeTypes) {
+          const c = grid[countKey(day, emp.id, ct.id)] || 0;
+          const o = grid[otpKey(day, emp.id, ct.id)] || 0;
+          row.push(c, o, c - o);
+          totalCyl += c;
+          totalEarn += (c * ct.price) + (o * otpBonus);
+        }
+        row.push(totalCyl, totalEarn);
+        if (totalCyl > 0) rows.push(row);
+      }
+    }
+
+    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = scope === "day"
+      ? `Deliveries_${year}-${String(month).padStart(2, "0")}-${String(selectedDay).padStart(2, "0")}.csv`
+      : `Deliveries_${getMonthName(month)}_${year}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-48px)] md:h-[calc(100vh-48px)] font-[Poppins]">
+    <div className="flex flex-col h-[calc(100vh-48px)] md:h-[calc(100vh-48px)]">
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
       {/* Header */}
@@ -202,6 +288,35 @@ export default function DailyEntryPage() {
           <p className="text-[13px] text-slate-500">Enter daily counts for each delivery man</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          {/* CSV Export */}
+          <div className="relative group">
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-medium hover:bg-emerald-100 transition"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              CSV
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-40 hidden group-hover:block z-50">
+              <button
+                onClick={() => exportCSV("day")}
+                className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 transition"
+              >
+                Export Day ({selectedDay} {getMonthName(month).slice(0, 3)})
+              </button>
+              <button
+                onClick={() => exportCSV("month")}
+                className="w-full text-left px-3 py-2 text-xs text-slate-600 hover:bg-slate-50 transition"
+              >
+                Export Month ({getMonthName(month).slice(0, 3)} {year})
+              </button>
+            </div>
+          </div>
+
           {/* View Toggle */}
           <div className="bg-slate-100 rounded-lg p-0.5 flex gap-0.5">
             <button
@@ -225,16 +340,14 @@ export default function DailyEntryPage() {
           </div>
 
           {view === "grid" && (
-            <MonthSelector month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y); }} />
+            <CalendarPicker month={month} year={year} onMonthChange={(m, y) => { setMonth(m); setYear(y); }} />
           )}
         </div>
       </div>
 
       {/* Content */}
       {loading ? (
-        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">
-          Loading...
-        </div>
+        <div className="flex-1 flex items-center justify-center text-slate-400 text-sm">Loading...</div>
       ) : employees.length === 0 ? (
         <div className="flex-1 flex items-center justify-center text-slate-400">
           <div className="text-center">
@@ -242,13 +355,20 @@ export default function DailyEntryPage() {
             <p className="text-xs mt-1">Add delivery staff in the Employees section first.</p>
           </div>
         </div>
+      ) : activeTypes.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-slate-400">
+          <div className="text-center">
+            <p className="text-[13px] font-medium">No cylinder types configured</p>
+            <p className="text-xs mt-1">Add cylinder types in Settings first.</p>
+          </div>
+        </div>
       ) : view === "day" ? (
         /* ===== DAY VIEW ===== */
         <div className="flex-1 overflow-y-auto animate-fade-in">
-          {/* Date Navigation */}
+          {/* Date Navigation with Calendar */}
           <div className="flex items-center justify-between mb-4 bg-white border border-slate-200 rounded-lg p-3">
             <button
-              onClick={prevDay}
+              onClick={() => setSelectedDay(d => Math.max(1, d - 1))}
               disabled={selectedDay <= 1}
               className="p-2 rounded-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
@@ -263,16 +383,14 @@ export default function DailyEntryPage() {
               </div>
               <div className="flex items-center justify-center gap-2 mt-0.5">
                 {isToday && (
-                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700">
-                    Today
-                  </span>
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700">Today</span>
                 )}
                 <span className="text-xs text-slate-400">{year}</span>
               </div>
             </div>
 
             <button
-              onClick={nextDay}
+              onClick={() => setSelectedDay(d => Math.min(daysInMonth, d + 1))}
               disabled={selectedDay >= daysInMonth}
               className="p-2 rounded-lg hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
             >
@@ -281,81 +399,130 @@ export default function DailyEntryPage() {
               </svg>
             </button>
 
-            {/* Month nav */}
+            {/* Calendar Picker */}
             <div className="hidden sm:flex items-center ml-3 pl-3 border-l border-slate-200 gap-1">
-              <MonthSelector month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y); setSelectedDay(1); }} />
+              <CalendarPicker
+                month={month}
+                year={year}
+                selectedDay={selectedDay}
+                onMonthChange={(m, y) => { setMonth(m); setYear(y); setSelectedDay(1); }}
+                onDaySelect={(d) => setSelectedDay(d)}
+                showDayPicker
+              />
             </div>
           </div>
 
-          {/* Employee Cards Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+          {/* Employee Cards */}
+          <div className="space-y-3 mb-4">
             {employees.map((emp) => {
-              const key = cellKey(selectedDay, emp.id);
-              const count = grid[key] || 0;
-              const origCount = original[key] || 0;
-              const isModified = count !== origCount;
-              const earnings = count * (emp.rate || 0);
+              const totalCyl = empDayTotal(emp.id, selectedDay);
+              const earnings = empDayEarnings(emp.id, selectedDay);
+              const hasChanges = activeTypes.some(ct => {
+                const ck = countKey(selectedDay, emp.id, ct.id);
+                const ok = otpKey(selectedDay, emp.id, ct.id);
+                return (grid[ck] || 0) !== (original[ck] || 0) || (grid[ok] || 0) !== (original[ok] || 0);
+              });
 
               return (
-                <div
-                  key={emp.id}
-                  className="bg-white border border-slate-200 rounded-lg p-4"
-                >
+                <div key={emp.id} className="bg-white border border-slate-200 rounded-lg p-4">
                   {/* Employee header */}
-                  <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-sm font-semibold flex-shrink-0">
                         {emp.name[0]}
                       </div>
                       <div>
                         <span className="text-sm font-medium text-slate-800 block">{emp.name}</span>
-                        {isModified && (
+                        {hasChanges && (
                           <span className="text-[11px] text-blue-600 font-medium">modified</span>
                         )}
                       </div>
                     </div>
-                    <span className="text-xs text-slate-400">
-                      {formatCurrency(emp.rate)}/cyl
-                    </span>
+                    {totalCyl > 0 && (
+                      <div className="text-right">
+                        <div className="text-xs text-slate-400">Total: {totalCyl} cyl</div>
+                        <div className="text-sm font-semibold text-slate-800 tabular-nums">{formatCurrency(earnings)}</div>
+                      </div>
+                    )}
                   </div>
 
-                  {/* Counter */}
-                  <div className="flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => decrement(emp.id)}
-                      disabled={count <= 0}
-                      className="w-10 h-10 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-lg font-medium transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      -
-                    </button>
+                  {/* Cylinder type entries */}
+                  <div className="space-y-2.5">
+                    {activeTypes.map((ct) => {
+                      const ck = countKey(selectedDay, emp.id, ct.id);
+                      const ok = otpKey(selectedDay, emp.id, ct.id);
+                      const count = grid[ck] || 0;
+                      const otp = grid[ok] || 0;
+                      const nonOtp = count - otp;
+                      const earn = (count * ct.price) + (otp * otpBonus);
 
-                    <input
-                      type="number"
-                      min={0}
-                      value={count || ""}
-                      onChange={(e) => {
-                        const val = e.target.value === "" ? 0 : parseInt(e.target.value, 10);
-                        if (!isNaN(val)) setCount(emp.id, val);
-                      }}
-                      onFocus={(e) => e.target.select()}
-                      className="w-20 h-12 text-center text-xl font-semibold tabular-nums rounded-lg border border-slate-200 text-slate-800 outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 bg-white"
-                      placeholder="0"
-                    />
-
-                    <button
-                      onClick={() => increment(emp.id)}
-                      className="w-10 h-10 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center text-lg font-medium transition-colors"
-                    >
-                      +
-                    </button>
+                      return (
+                        <div key={ct.id} className="bg-slate-50 rounded-lg px-3 py-2.5">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-slate-600">
+                              {ct.name} <span className="text-slate-400">@ {formatCurrency(ct.price)}</span>
+                            </span>
+                            {count > 0 && (
+                              <span className="text-[11px] text-slate-500 tabular-nums">{formatCurrency(earn)}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3">
+                            {/* OTP count */}
+                            <div className="flex-1">
+                              <label className="text-[10px] font-medium text-emerald-600 uppercase tracking-wide mb-1 block">
+                                With OTP (+{formatCurrency(otpBonus)})
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={otp || ""}
+                                onChange={(e) => {
+                                  const val = e.target.value === "" ? 0 : parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 0) {
+                                    setVal(ok, val);
+                                    // Ensure count >= otp
+                                    const currentCount = grid[ck] || 0;
+                                    if (val > currentCount) setVal(ck, val);
+                                  }
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                className="w-full h-9 text-center text-sm font-semibold tabular-nums rounded-md border border-emerald-200 bg-emerald-50 text-emerald-800 outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400"
+                                placeholder="0"
+                              />
+                            </div>
+                            {/* Non-OTP count */}
+                            <div className="flex-1">
+                              <label className="text-[10px] font-medium text-slate-500 uppercase tracking-wide mb-1 block">
+                                Without OTP
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={nonOtp > 0 ? nonOtp : ""}
+                                onChange={(e) => {
+                                  const val = e.target.value === "" ? 0 : parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 0) {
+                                    const currentOtp = grid[ok] || 0;
+                                    setVal(ck, currentOtp + val);
+                                  }
+                                }}
+                                onFocus={(e) => e.target.select()}
+                                className="w-full h-9 text-center text-sm font-semibold tabular-nums rounded-md border border-slate-200 bg-white text-slate-800 outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                                placeholder="0"
+                              />
+                            </div>
+                            {/* Total */}
+                            <div className="w-14 text-center">
+                              <label className="text-[10px] font-medium text-slate-400 uppercase tracking-wide mb-1 block">Total</label>
+                              <div className="h-9 flex items-center justify-center text-sm font-bold text-slate-800 tabular-nums">
+                                {count || "—"}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  {/* Earnings */}
-                  {count > 0 && (
-                    <div className="mt-3 text-center text-xs text-slate-400">
-                      Earnings: <span className="font-medium text-slate-600 tabular-nums">{formatCurrency(earnings)}</span>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -386,11 +553,7 @@ export default function DailyEntryPage() {
                 : "bg-slate-100 text-slate-400 cursor-not-allowed"
             )}
           >
-            {saving
-              ? "Saving..."
-              : dayChanges > 0
-                ? `Save Changes (${dayChanges} modified)`
-                : "No Changes"}
+            {saving ? "Saving..." : dayChanges > 0 ? `Save Changes (${dayChanges} modified)` : "No Changes"}
           </button>
         </div>
       ) : (
@@ -439,12 +602,7 @@ export default function DailyEntryPage() {
                   const total = rowTotal(day);
 
                   return (
-                    <tr
-                      key={day}
-                      className={cn(
-                        isSunday ? "bg-amber-50/40" : "hover:bg-slate-50"
-                      )}
-                    >
+                    <tr key={day} className={cn(isSunday ? "bg-amber-50/40" : "hover:bg-slate-50")}>
                       <td
                         className={cn(
                           "sticky left-0 z-10 border-b border-r border-slate-200 px-3 py-1 text-sm whitespace-nowrap cursor-pointer hover:bg-slate-50 transition-colors",
@@ -459,31 +617,32 @@ export default function DailyEntryPage() {
                         </span>
                       </td>
                       {employees.map((emp) => {
-                        const key = cellKey(day, emp.id);
-                        const val = grid[key] || 0;
-                        const origVal = original[key] || 0;
-                        const isModified = val !== origVal;
+                        const total = empDayTotal(emp.id, day);
+                        const hasOtp = activeTypes.some(ct => (grid[otpKey(day, emp.id, ct.id)] || 0) > 0);
+                        const hasChanges = activeTypes.some(ct => {
+                          const ck = countKey(day, emp.id, ct.id);
+                          const ok = otpKey(day, emp.id, ct.id);
+                          return (grid[ck] || 0) !== (original[ck] || 0) || (grid[ok] || 0) !== (original[ok] || 0);
+                        });
 
                         return (
-                          <td key={emp.id} className={cn("border-b border-r border-slate-200 p-0", isSunday && "bg-amber-50/30")}>
-                            <input
-                              type="number"
-                              min={0}
-                              value={val || ""}
-                              onChange={(e) => {
-                                const parsed = e.target.value === "" ? 0 : parseInt(e.target.value, 10);
-                                if (!isNaN(parsed) && parsed >= 0) {
-                                  setGrid(prev => ({ ...prev, [key]: parsed }));
-                                }
-                              }}
-                              onFocus={(e) => e.target.select()}
-                              className={cn(
-                                "w-full h-full px-2 py-1 text-right text-sm tabular-nums border-0 outline-none focus:ring-1 focus:ring-inset focus:ring-slate-400 focus:bg-slate-50 transition-colors bg-transparent",
-                                isModified && "bg-blue-50 text-slate-800",
-                                val === 0 && "text-slate-300"
-                              )}
-                              placeholder="0"
-                            />
+                          <td
+                            key={emp.id}
+                            className={cn(
+                              "border-b border-r border-slate-200 px-2 py-1 text-center text-sm tabular-nums cursor-pointer hover:bg-slate-100 transition-colors",
+                              hasChanges && "bg-blue-50",
+                              isSunday && !hasChanges && "bg-amber-50/30",
+                              total === 0 && "text-slate-300"
+                            )}
+                            onClick={() => { setSelectedDay(day); setView("day"); }}
+                            title="Click to edit details"
+                          >
+                            {total > 0 ? (
+                              <span>
+                                {total}
+                                {hasOtp && <span className="text-[9px] text-emerald-600 ml-0.5">*</span>}
+                              </span>
+                            ) : ""}
                           </td>
                         );
                       })}
@@ -513,6 +672,13 @@ export default function DailyEntryPage() {
                 </tr>
               </tbody>
             </table>
+          </div>
+
+          {/* Legend */}
+          <div className="mt-2 flex items-center gap-4 text-[10px] text-slate-400 flex-shrink-0">
+            <span><span className="text-emerald-600">*</span> = has OTP entries</span>
+            <span className="inline-block w-3 h-3 bg-blue-50 border border-blue-200 rounded"></span>
+            <span>= modified</span>
           </div>
         </div>
       )}

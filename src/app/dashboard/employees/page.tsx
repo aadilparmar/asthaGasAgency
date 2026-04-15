@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import Modal from "@/components/Modal";
+import CustomSelect from "@/components/CustomSelect";
 import Toast from "@/components/Toast";
 import { formatCurrency, cn } from "@/lib/utils";
 
@@ -16,7 +17,7 @@ interface Employee {
 
 type Tab = "delivery" | "office";
 
-const emptyForm = { name: "", type: "delivery" as "delivery" | "office", rate: "", fixedSalary: "" };
+const emptyForm = { name: "", type: "delivery" as "delivery" | "office", fixedSalary: "" };
 
 export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -62,7 +63,6 @@ export default function EmployeesPage() {
     setForm({
       name: emp.name,
       type: emp.type,
-      rate: emp.rate?.toString() || "",
       fixedSalary: emp.fixedSalary?.toString() || "",
     });
     setModalOpen(true);
@@ -82,9 +82,7 @@ export default function EmployeesPage() {
       name: form.name.trim(),
       type: form.type,
     };
-    if (form.type === "delivery") {
-      body.rate = Number(form.rate);
-    } else {
+    if (form.type === "office") {
       body.fixedSalary = Number(form.fixedSalary);
     }
 
@@ -138,7 +136,7 @@ export default function EmployeesPage() {
   ];
 
   return (
-    <div className="animate-fade-in font-[Poppins,sans-serif]">
+    <div className="animate-fade-in">
       {toast && <Toast type={toast.type} message={toast.message} onClose={() => setToast(null)} />}
 
       {/* Header */}
@@ -166,15 +164,11 @@ export default function EmployeesPage() {
             onClick={() => setTab(t.key)}
             className={cn(
               "px-4 py-2 text-sm font-medium rounded-lg transition",
-              tab === t.key
-                ? "bg-white text-slate-800 shadow-sm"
-                : "text-slate-500 hover:text-slate-700"
+              tab === t.key ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"
             )}
           >
             {t.label}
-            <span className="ml-2 text-xs text-slate-400">
-              ({employees.filter((e) => e.type === t.key).length})
-            </span>
+            <span className="ml-2 text-xs text-slate-400">({employees.filter((e) => e.type === t.key).length})</span>
           </button>
         ))}
       </div>
@@ -182,19 +176,15 @@ export default function EmployeesPage() {
       {/* Table */}
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         {loading ? (
-          <div className="flex items-center justify-center h-48 text-slate-400 text-sm">
-            Loading employees...
-          </div>
+          <div className="flex items-center justify-center h-48 text-slate-400 text-sm">Loading employees...</div>
         ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-48 text-slate-400">
             <p className="text-sm">No {tab} staff found</p>
-            <button onClick={openAdd} className="mt-2 text-sm text-slate-600 hover:text-slate-800 font-medium">
-              Add one now
-            </button>
+            <button onClick={openAdd} className="mt-2 text-sm text-slate-600 hover:text-slate-800 font-medium">Add one now</button>
           </div>
         ) : (
           <>
-            {/* Mobile: Card view */}
+            {/* Mobile */}
             <div className="sm:hidden divide-y divide-slate-100">
               {filtered.map((emp) => (
                 <div key={emp.id} className="p-4">
@@ -206,7 +196,8 @@ export default function EmployeesPage() {
                       <div>
                         <div className="text-sm font-medium text-slate-800">{emp.name}</div>
                         <div className="text-xs text-slate-500 tabular-nums">
-                          {tab === "delivery" ? `${formatCurrency(emp.rate)}/cyl` : formatCurrency(emp.fixedSalary)}
+                          {tab === "office" && formatCurrency(emp.fixedSalary)}
+                          {tab === "delivery" && "Delivery Staff"}
                         </div>
                       </div>
                     </div>
@@ -218,33 +209,26 @@ export default function EmployeesPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-3 mt-3 pt-2 border-t border-slate-100">
-                    <button onClick={() => openEdit(emp)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition">
-                      Edit
-                    </button>
+                    <button onClick={() => openEdit(emp)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition">Edit</button>
                     <button
                       onClick={() => toggleActive(emp)}
-                      className={cn(
-                        "text-xs font-medium transition",
-                        emp.active ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"
-                      )}
+                      className={cn("text-xs font-medium transition", emp.active ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700")}
                     >
                       {emp.active ? "Deactivate" : "Activate"}
                     </button>
-                    <button onClick={() => setDeleteConfirm(emp.id)} className="text-xs font-medium text-rose-500 hover:text-rose-600 transition">
-                      Delete
-                    </button>
+                    <button onClick={() => setDeleteConfirm(emp.id)} className="text-xs font-medium text-rose-500 hover:text-rose-600 transition">Delete</button>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Desktop: Table view */}
+            {/* Desktop */}
             <table className="w-full text-sm hidden sm:table">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Name</th>
                   <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">
-                    {tab === "delivery" ? "Rate (per cylinder)" : "Fixed Salary"}
+                    {tab === "delivery" ? "Type" : "Fixed Salary"}
                   </th>
                   <th className="text-left px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Status</th>
                   <th className="text-right px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wide">Actions</th>
@@ -262,7 +246,11 @@ export default function EmployeesPage() {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 tabular-nums">
-                      {tab === "delivery" ? formatCurrency(emp.rate || 0) : formatCurrency(emp.fixedSalary || 0)}
+                      {tab === "delivery" ? (
+                        <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-blue-50 text-blue-700">Delivery</span>
+                      ) : (
+                        formatCurrency(emp.fixedSalary || 0)
+                      )}
                     </td>
                     <td className="px-5 py-3.5">
                       <span className={cn(
@@ -274,21 +262,14 @@ export default function EmployeesPage() {
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-4">
-                        <button onClick={() => openEdit(emp)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition">
-                          Edit
-                        </button>
+                        <button onClick={() => openEdit(emp)} className="text-xs font-medium text-slate-500 hover:text-slate-700 transition">Edit</button>
                         <button
                           onClick={() => toggleActive(emp)}
-                          className={cn(
-                            "text-xs font-medium transition",
-                            emp.active ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700"
-                          )}
+                          className={cn("text-xs font-medium transition", emp.active ? "text-amber-600 hover:text-amber-700" : "text-emerald-600 hover:text-emerald-700")}
                         >
                           {emp.active ? "Deactivate" : "Activate"}
                         </button>
-                        <button onClick={() => setDeleteConfirm(emp.id)} className="text-xs font-medium text-rose-500 hover:text-rose-600 transition">
-                          Delete
-                        </button>
+                        <button onClick={() => setDeleteConfirm(emp.id)} className="text-xs font-medium text-rose-500 hover:text-rose-600 transition">Delete</button>
                       </div>
                     </td>
                   </tr>
@@ -316,29 +297,21 @@ export default function EmployeesPage() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1.5">Type</label>
-            <select
+            <CustomSelect
+              options={[
+                { value: "delivery", label: "Delivery" },
+                { value: "office", label: "Office" },
+              ]}
               value={form.type}
-              onChange={(e) => setForm({ ...form, type: e.target.value as "delivery" | "office" })}
-              className="w-full rounded-lg border border-slate-200 text-sm py-2 px-3 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none bg-white transition"
-            >
-              <option value="delivery">Delivery</option>
-              <option value="office">Office</option>
-            </select>
+              onChange={(v) => setForm({ ...form, type: v as "delivery" | "office" })}
+            />
           </div>
 
           {form.type === "delivery" && (
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Rate per Cylinder</label>
-              <input
-                type="number"
-                required
-                min="0"
-                step="0.01"
-                value={form.rate}
-                onChange={(e) => setForm({ ...form, rate: e.target.value })}
-                className="w-full rounded-lg border border-slate-200 text-sm py-2 px-3 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none transition"
-                placeholder="e.g. 25"
-              />
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+              <p className="text-xs text-blue-700">
+                Delivery staff rates are set per cylinder type in Settings. No individual rate needed.
+              </p>
             </div>
           )}
 
@@ -359,18 +332,10 @@ export default function EmployeesPage() {
           )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={closeModal}
-              className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition"
-            >
+            <button type="button" onClick={closeModal} className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-4 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg transition"
-            >
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-700 disabled:opacity-50 rounded-lg transition">
               {saving ? "Saving..." : editingId ? "Update" : "Add Employee"}
             </button>
           </div>
@@ -383,16 +348,10 @@ export default function EmployeesPage() {
           Are you sure? This will permanently delete this employee and all their associated records.
         </p>
         <div className="flex justify-end gap-3">
-          <button
-            onClick={() => setDeleteConfirm(null)}
-            className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition"
-          >
+          <button onClick={() => setDeleteConfirm(null)} className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-lg transition">
             Cancel
           </button>
-          <button
-            onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
-            className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition"
-          >
+          <button onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="px-4 py-2 text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 rounded-lg transition">
             Delete
           </button>
         </div>

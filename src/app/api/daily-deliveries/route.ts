@@ -20,7 +20,10 @@ export async function GET(request: NextRequest) {
       date: { gte: startDate, lte: endDate },
       employee: { type: "delivery", active: true },
     },
-    include: { employee: { select: { id: true, name: true } } },
+    include: {
+      employee: { select: { id: true, name: true } },
+      cylinderType: { select: { id: true, name: true, price: true } },
+    },
     orderBy: { date: "asc" },
   });
 
@@ -29,24 +32,35 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const entries: { employeeId: string; date: string; count: number }[] =
-      await request.json();
+    const entries: {
+      employeeId: string;
+      date: string;
+      cylinderTypeId: string;
+      count: number;
+      otpCount: number;
+    }[] = await request.json();
 
     const results = [];
     for (const entry of entries) {
       const dateObj = new Date(entry.date + "T00:00:00Z");
       const result = await prisma.dailyDelivery.upsert({
         where: {
-          employeeId_date: {
+          employeeId_date_cylinderTypeId: {
             employeeId: entry.employeeId,
             date: dateObj,
+            cylinderTypeId: entry.cylinderTypeId,
           },
         },
-        update: { count: entry.count },
+        update: {
+          count: entry.count,
+          otpCount: entry.otpCount,
+        },
         create: {
           employeeId: entry.employeeId,
           date: dateObj,
+          cylinderTypeId: entry.cylinderTypeId,
           count: entry.count,
+          otpCount: entry.otpCount,
         },
       });
       results.push(result);

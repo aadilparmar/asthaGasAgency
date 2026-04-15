@@ -13,6 +13,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Get OTP bonus setting
+  const otpSetting = await prisma.appSetting.findUnique({ where: { key: "otp_bonus" } });
+  const otpBonus = Number(otpSetting?.value) || 2;
+
   const where: Record<string, unknown> = { active: true };
   if (type) where.type = type;
 
@@ -23,21 +27,29 @@ export async function GET(request: NextRequest) {
 
   const salaryData = await Promise.all(
     employees.map(async (emp) => {
-      // Total deliveries this month
-      const deliveries = await prisma.dailyDelivery.aggregate({
-        where: {
-          employeeId: emp.id,
-          date: { gte: startDate, lte: endDate },
-        },
-        _sum: { count: true },
-      });
-      const totalDeliveries = deliveries._sum.count || 0;
+      let totalDeliveries = 0;
+      let totalOtpCount = 0;
+      let grossSalary = 0;
 
-      // Gross salary
-      const grossSalary =
-        emp.type === "delivery"
-          ? totalDeliveries * emp.rate
-          : emp.fixedSalary;
+      if (emp.type === "delivery") {
+        // Get all delivery entries with cylinder type info
+        const deliveries = await prisma.dailyDelivery.findMany({
+          where: {
+            employeeId: emp.id,
+            date: { gte: startDate, lte: endDate },
+          },
+          include: { cylinderType: true },
+        });
+
+        for (const d of deliveries) {
+          totalDeliveries += d.count;
+          totalOtpCount += d.otpCount;
+          // Earnings: (count × cylinderType.price) + (otpCount × otpBonus)
+          grossSalary += (d.count * d.cylinderType.price) + (d.otpCount * otpBonus);
+        }
+      } else {
+        grossSalary = emp.fixedSalary;
+      }
 
       // All loans ever given to this employee
       const totalLoansEver = await prisma.loanTransaction.aggregate({
@@ -100,7 +112,7 @@ export async function GET(request: NextRequest) {
       return {
         employee: emp,
         totalDeliveries,
-        rate: emp.type === "delivery" ? emp.rate : 0,
+        totalOtpCount,
         grossSalary,
         openingLoan,
         additionalLoan,
@@ -117,6 +129,7 @@ export async function GET(request: NextRequest) {
   const totals = salaryData.reduce(
     (acc, s) => ({
       totalDeliveries: acc.totalDeliveries + s.totalDeliveries,
+      totalOtpCount: acc.totalOtpCount + s.totalOtpCount,
       grossSalary: acc.grossSalary + s.grossSalary,
       totalDeductions: acc.totalDeductions + s.totalDeductions,
       netPayable: acc.netPayable + s.netPayable,
@@ -126,6 +139,7 @@ export async function GET(request: NextRequest) {
     }),
     {
       totalDeliveries: 0,
+      totalOtpCount: 0,
       grossSalary: 0,
       totalDeductions: 0,
       netPayable: 0,
@@ -135,5 +149,5 @@ export async function GET(request: NextRequest) {
     }
   );
 
-  return NextResponse.json({ employees: salaryData, totals });
+  return NextResponse.json({ employees: salaryData, totals, otpBonus });
 }

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import MonthSelector from "@/components/MonthSelector";
+import CalendarPicker from "@/components/CalendarPicker";
+import CustomSelect from "@/components/CustomSelect";
 import { formatCurrency, getMonthName, getFinancialYear, cn } from "@/lib/utils";
 
 interface EmployeeSalary {
   employee: { id: string; name: string; type: string; rate: number; fixedSalary: number };
   totalDeliveries: number;
+  totalOtpCount: number;
   grossSalary: number;
   openingLoan: number;
   additionalLoan: number;
@@ -21,9 +23,9 @@ export default function ReportsPage() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-  const [data, setData] = useState<{ employees: EmployeeSalary[] } | null>(null);
+  const [data, setData] = useState<{ employees: EmployeeSalary[]; otpBonus: number } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [exportType, setExportType] = useState<"delivery" | "office" | "all">("all");
+  const [exportType, setExportType] = useState<string>("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,28 +48,29 @@ export default function ReportsPage() {
       totalDeductions: acc.totalDeductions + s.totalDeductions,
       netPayable: acc.netPayable + s.netPayable,
       totalDeliveries: acc.totalDeliveries + s.totalDeliveries,
+      totalOtpCount: acc.totalOtpCount + s.totalOtpCount,
       openingLoan: acc.openingLoan + s.openingLoan,
       loanCarryForward: acc.loanCarryForward + s.loanCarryForward,
     }),
-    { grossSalary: 0, totalDeductions: 0, netPayable: 0, totalDeliveries: 0, openingLoan: 0, loanCarryForward: 0 }
+    { grossSalary: 0, totalDeductions: 0, netPayable: 0, totalDeliveries: 0, totalOtpCount: 0, openingLoan: 0, loanCarryForward: 0 }
   );
 
   function downloadCSV() {
     const headers = [
-      "Employee", "Type", "Deliveries", "Gross Salary",
+      "Employee", "Type", "Deliveries", "OTP Count", "Gross Salary",
       "Opening Loan", "PF", "Loan Instalment", "UPAD 1", "UPAD 15", "UPAD Other",
       "Total Deductions", "Net Payable", "Loan C/F"
     ];
 
     const rows = filtered.map((s) => [
-      s.employee.name, s.employee.type, s.totalDeliveries, s.grossSalary,
+      s.employee.name, s.employee.type, s.totalDeliveries, s.totalOtpCount, s.grossSalary,
       s.openingLoan, s.deductions.pf || 0, s.deductions.loan_instalment || 0,
       s.deductions.upad_1 || 0, s.deductions.upad_15 || 0, s.deductions.upad_other || 0,
       s.totalDeductions, s.netPayable, s.loanCarryForward,
     ]);
 
     rows.push([
-      "TOTAL", "", totals.totalDeliveries, totals.grossSalary,
+      "TOTAL", "", totals.totalDeliveries, totals.totalOtpCount, totals.grossSalary,
       totals.openingLoan, "", "", "", "", "",
       totals.totalDeductions, totals.netPayable, totals.loanCarryForward,
     ]);
@@ -83,27 +86,28 @@ export default function ReportsPage() {
   }
 
   return (
-    <div className="animate-fade-in font-[Poppins,sans-serif]">
+    <div className="animate-fade-in">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-lg font-semibold text-slate-800">Reports</h1>
           <p className="text-[13px] text-slate-500">FY {getFinancialYear(month, year)} — {getMonthName(month)} {year}</p>
         </div>
-        <MonthSelector month={month} year={year} onChange={(m, y) => { setMonth(m); setYear(y); }} />
+        <CalendarPicker month={month} year={year} onMonthChange={(m, y) => { setMonth(m); setYear(y); }} />
       </div>
 
       {/* Actions */}
       <div className="flex flex-wrap items-center gap-2 mb-5 no-print">
-        <select
+        <CustomSelect
+          options={[
+            { value: "all", label: "All Staff" },
+            { value: "delivery", label: "Delivery Staff" },
+            { value: "office", label: "Office Staff" },
+          ]}
           value={exportType}
-          onChange={(e) => setExportType(e.target.value as "delivery" | "office" | "all")}
-          className="rounded-lg border border-slate-200 text-sm py-2 px-3 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 outline-none bg-white transition"
-        >
-          <option value="all">All Staff</option>
-          <option value="delivery">Delivery Staff</option>
-          <option value="office">Office Staff</option>
-        </select>
+          onChange={setExportType}
+          className="w-40"
+        />
         <button
           onClick={downloadCSV}
           className="px-4 py-2 bg-emerald-50 text-emerald-700 border border-emerald-200 text-sm font-medium rounded-lg hover:bg-emerald-100 transition flex items-center gap-2"
@@ -146,12 +150,9 @@ export default function ReportsPage() {
 
       {/* Report Table */}
       {loading ? (
-        <div className="flex items-center justify-center h-40 text-slate-400 text-sm">
-          Loading report...
-        </div>
+        <div className="flex items-center justify-center h-40 text-slate-400 text-sm">Loading report...</div>
       ) : (
         <div className="bg-white border border-slate-200 rounded-lg overflow-x-auto print:border-0">
-          {/* Print Header */}
           <div className="p-4 border-b border-slate-100 print:text-center">
             <h2 className="text-lg font-semibold text-slate-800">Astha Gas Agency — Desainagar</h2>
             <p className="text-[13px] text-slate-500">Salary Report — {getMonthName(month)} {year}</p>
@@ -164,6 +165,7 @@ export default function ReportsPage() {
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Employee</th>
                 <th className="text-left px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Type</th>
                 <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Deliveries</th>
+                <th className="text-right px-3 py-2.5 text-xs font-medium text-emerald-600 uppercase tracking-wide">OTP</th>
                 <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Gross</th>
                 <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Deductions</th>
                 <th className="text-right px-3 py-2.5 text-xs font-medium text-slate-500 uppercase tracking-wide">Net Payable</th>
@@ -186,6 +188,9 @@ export default function ReportsPage() {
                   <td className="text-right px-3 py-2.5 tabular-nums">
                     {s.employee.type === "delivery" ? s.totalDeliveries.toLocaleString("en-IN") : "—"}
                   </td>
+                  <td className="text-right px-3 py-2.5 tabular-nums text-emerald-600">
+                    {s.employee.type === "delivery" && s.totalOtpCount > 0 ? s.totalOtpCount.toLocaleString("en-IN") : "—"}
+                  </td>
                   <td className="text-right px-3 py-2.5 font-medium tabular-nums">{formatCurrency(s.grossSalary)}</td>
                   <td className="text-right px-3 py-2.5 text-rose-600 tabular-nums">{formatCurrency(s.totalDeductions)}</td>
                   <td className="text-right px-3 py-2.5 font-semibold text-emerald-700 tabular-nums">{formatCurrency(s.netPayable)}</td>
@@ -197,6 +202,7 @@ export default function ReportsPage() {
               <tr className="bg-slate-50 border-t border-slate-300 font-semibold text-sm text-slate-800">
                 <td className="px-4 py-3" colSpan={3}>TOTAL ({filtered.length} employees)</td>
                 <td className="text-right px-3 py-3 tabular-nums">{totals.totalDeliveries.toLocaleString("en-IN")}</td>
+                <td className="text-right px-3 py-3 tabular-nums text-emerald-600">{totals.totalOtpCount.toLocaleString("en-IN")}</td>
                 <td className="text-right px-3 py-3 tabular-nums">{formatCurrency(totals.grossSalary)}</td>
                 <td className="text-right px-3 py-3 text-rose-700 tabular-nums">{formatCurrency(totals.totalDeductions)}</td>
                 <td className="text-right px-3 py-3 text-emerald-700 tabular-nums">{formatCurrency(totals.netPayable)}</td>
