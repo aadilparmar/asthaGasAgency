@@ -14,8 +14,15 @@
 
   --color-sidebar: #1e293b;
 
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-mono: var(--font-jb-mono), ui-monospace, monospace;
+
   --animate-fade-in: fade-in 0.15s ease-out;
   --animate-slide-in-right: slide-in-right 0.2s ease-out;
+  --animate-rise: rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-grow-width: grow-width 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+  --animate-ticker: ticker 35s linear infinite;
 }
 
 @keyframes fade-in {
@@ -26,6 +33,41 @@
 @keyframes slide-in-right {
   from { opacity: 0; transform: translateX(12px); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes grow-width {
+  from { transform: scaleX(0); transform-origin: left; }
+  to { transform: scaleX(1); transform-origin: left; }
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-feature-settings: "ss01", "ss02";
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" on, "zero" on;
+}
+
+/* Tabular numerals */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 * {
@@ -44,8 +86,36 @@ input[type="number"] {
 }
 
 ::selection {
-  background-color: #e0e7ff;
-  color: #312e81;
+  background-color: #d1fae5;
+  color: #064e3b;
+}
+
+html, body {
+  overflow-x: hidden;
+}
+
+/* Dashboard-specific "control room" look */
+.dashboard-hero {
+  background:
+    radial-gradient(ellipse 80% 60% at 20% 0%, rgba(16, 185, 129, 0.09), transparent 50%),
+    radial-gradient(ellipse 60% 80% at 100% 100%, rgba(139, 92, 246, 0.08), transparent 50%),
+    linear-gradient(to bottom right, #0a0a0f 0%, #171722 100%);
+}
+
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.noise {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' /></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: overlay;
 }
 
 @media print {

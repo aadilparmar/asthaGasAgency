@@ -3,3 +3,12 @@ node_modules/
 .env
 *.db
 *.db-journal
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Tooling (per-user)
+.claude/
+
+# Source spreadsheets — contain real payroll data, reference only
+*.xlsx

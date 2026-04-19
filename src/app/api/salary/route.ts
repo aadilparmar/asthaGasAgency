@@ -13,7 +13,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Get OTP bonus setting
   const otpSetting = await prisma.appSetting.findUnique({ where: { key: "otp_bonus" } });
   const otpBonus = Number(otpSetting?.value) || 2;
 
@@ -22,8 +21,8 @@ export async function GET(request: NextRequest) {
 
   const employees = await prisma.employee.findMany({ where, orderBy: { name: "asc" } });
 
-  const startDate = new Date(year, month - 1, 1);
-  const endDate = new Date(year, month, 0, 23, 59, 59);
+  const startDate = new Date(Date.UTC(year, month - 1, 1));
+  const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
 
   const salaryData = await Promise.all(
     employees.map(async (emp) => {
@@ -32,32 +31,30 @@ export async function GET(request: NextRequest) {
       let grossSalary = 0;
 
       if (emp.type === "delivery") {
-        // Get all delivery entries with cylinder type info
-        const deliveries = await prisma.dailyDelivery.findMany({
+        // Pull cylinder sales (Daily Ops) scoped to the month
+        const sales = await prisma.cylinderSale.findMany({
           where: {
             employeeId: emp.id,
-            date: { gte: startDate, lte: endDate },
+            dailyOp: { date: { gte: startDate, lte: endDate } },
           },
           include: { cylinderType: true },
         });
 
-        for (const d of deliveries) {
-          totalDeliveries += d.count;
-          totalOtpCount += d.otpCount;
-          // Earnings: (count × cylinderType.price) + (otpCount × otpBonus)
-          grossSalary += (d.count * d.cylinderType.price) + (d.otpCount * otpBonus);
+        for (const s of sales) {
+          totalDeliveries += s.nsDomCount;
+          totalOtpCount += s.otpCount;
+          // Earnings = (nsDomCount × commission rate) + (otpCount × otpBonus)
+          grossSalary += s.nsDomCount * s.cylinderType.price + s.otpCount * otpBonus;
         }
       } else {
         grossSalary = emp.fixedSalary;
       }
 
-      // All loans ever given to this employee
       const totalLoansEver = await prisma.loanTransaction.aggregate({
         where: { employeeId: emp.id },
         _sum: { amount: true },
       });
 
-      // Total loan repayments before this month
       const priorRepayments = await prisma.monthlyDeduction.aggregate({
         where: {
           employeeId: emp.id,
@@ -70,7 +67,6 @@ export async function GET(request: NextRequest) {
         _sum: { amount: true },
       });
 
-      // Loans given before this month
       const priorLoans = await prisma.loanTransaction.aggregate({
         where: {
           employeeId: emp.id,
@@ -82,7 +78,6 @@ export async function GET(request: NextRequest) {
         _sum: { amount: true },
       });
 
-      // Loans given this month
       const currentMonthLoans = await prisma.loanTransaction.aggregate({
         where: { employeeId: emp.id, month, year },
         _sum: { amount: true },
@@ -93,7 +88,6 @@ export async function GET(request: NextRequest) {
       const additionalLoan = currentMonthLoans._sum.amount || 0;
       const netLoan = openingLoan + additionalLoan;
 
-      // Deductions this month
       const deductions = await prisma.monthlyDeduction.findMany({
         where: { employeeId: emp.id, month, year },
       });
