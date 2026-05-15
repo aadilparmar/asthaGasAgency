@@ -3,9 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider = "mysql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -51,7 +50,7 @@ model CylinderType {
 model AppSetting {
   id    String @id @default(cuid())
   key   String @unique
-  value String
+  value String @db.Text
 }
 
 model LoanTransaction {
@@ -60,7 +59,7 @@ model LoanTransaction {
   amount     Float
   month      Int
   year       Int
-  note       String   @default("")
+  note       String   @default("") @db.Text
   createdAt  DateTime @default(now())
   employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
@@ -119,7 +118,7 @@ model CommercialCustomer {
 model DailyOperation {
   id        String   @id @default(cuid())
   date      DateTime @unique
-  note      String   @default("")
+  note      String   @default("") @db.Text
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -168,7 +167,7 @@ model DailyExpense {
   id            String         @id @default(cuid())
   dailyOpId     String
   expenseHeadId String
-  particulars   String         @default("")
+  particulars   String         @default("") @db.Text
   amount        Float          @default(0)
   dailyOp       DailyOperation @relation(fields: [dailyOpId], references: [id], onDelete: Cascade)
   expenseHead   ExpenseHead    @relation(fields: [expenseHeadId], references: [id])
@@ -223,13 +222,13 @@ model Consumer {
   bpclId          String?
   name            String
   phone           String    @default("")
-  address         String    @default("")
+  address         String    @default("") @db.Text
   area            String    @default("")
   cylinderTypeId  String?
   connectionDate  DateTime?
   depositPaid     Float     @default(0)
   active          Boolean   @default(true)
-  note            String    @default("")
+  note            String    @default("") @db.Text
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -246,7 +245,7 @@ model ConsumerRefill {
   paymentMode     String       @default("cash")
   amount          Float        @default(0)
   employeeId      String?
-  note            String       @default("")
+  note            String       @default("") @db.Text
   createdAt       DateTime     @default(now())
 
   consumer     Consumer     @relation(fields: [consumerId], references: [id], onDelete: Cascade)
@@ -265,7 +264,7 @@ model CylinderStockTransaction {
   fullDelta      Int          @default(0)
   emptyDelta     Int          @default(0)
   consumerId     String?
-  note           String       @default("")
+  note           String       @default("") @db.Text
   createdAt      DateTime     @default(now())
 
   cylinderType CylinderType @relation(fields: [cylinderTypeId], references: [id])
