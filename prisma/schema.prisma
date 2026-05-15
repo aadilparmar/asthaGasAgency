@@ -15,6 +15,17 @@ model User {
   createdAt DateTime @default(now())
 }
 
+model LoginAttempt {
+  id        String   @id @default(cuid())
+  ipAddress String
+  username  String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ipAddress, createdAt])
+  @@index([username, createdAt])
+}
+
 model Employee {
   id          String   @id @default(cuid())
   name        String

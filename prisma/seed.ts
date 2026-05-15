@@ -9,7 +9,15 @@ async function main() {
   });
 
   if (!existingAdmin) {
-    const hashedPassword = await bcrypt.hash("astha@2025", 12);
+    const initialPassword = process.env.ADMIN_INITIAL_PASSWORD;
+    if (!initialPassword) {
+      console.error(
+        "Refusing to create admin user without ADMIN_INITIAL_PASSWORD set in env. " +
+          "Set it to a strong password, run seed again, then unset it."
+      );
+      process.exit(1);
+    }
+    const hashedPassword = await bcrypt.hash(initialPassword, 12);
     await prisma.user.create({
       data: {
         username: "admin",
@@ -17,7 +25,7 @@ async function main() {
         name: "Administrator",
       },
     });
-    console.log("Admin user created: admin / astha@2025");
+    console.log("Admin user created with password from ADMIN_INITIAL_PASSWORD");
   } else {
     console.log("Admin user already exists");
   }

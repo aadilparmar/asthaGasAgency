@@ -1,8 +1,14 @@
 node_modules/
 .next/
 .env
+.env.local
+.env.production
 *.db
 *.db-journal
+
+# Secrets used by scripts/ (must never be committed)
+scripts/.admin-password.tmp
+scripts/*.tmp
 
 # Build artifacts
 tsconfig.tsbuildinfo
