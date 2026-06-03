@@ -7,133 +7,124 @@ export async function GET(request: NextRequest) {
   const type = request.nextUrl.searchParams.get("type");
 
   if (!month || !year) {
-    return NextResponse.json({ error: "month and year required" }, { status: 400 });
+    return NextResponse.json(
+      { error: "month and year required" },
+      { status: 400 }
+    );
   }
 
-  const startDate = new Date(Date.UTC(year, month - 1, 1));
-  const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59));
-
-  const empWhere: Record<string, unknown> = { active: true };
-  if (type) empWhere.type = type;
-
-  // ─────────────────────────────────────────────────────────────
-  // ALL DATA IN 5 PARALLEL QUERIES — no N+1 loop
-  // ─────────────────────────────────────────────────────────────
-  const [
-    employees,
-    salesThisMonth,
-    allLoans,
-    allDeductions,
-    otpSetting,
-  ] = await Promise.all([
-    prisma.employee.findMany({ where: empWhere, orderBy: { name: "asc" } }),
-    prisma.cylinderSale.findMany({
-      where: { dailyOp: { date: { gte: startDate, lte: endDate } } },
-      select: {
-        employeeId: true,
-        nsDomCount: true,
-        otpCount: true,
-        cylinderType: { select: { price: true } },
-      },
-    }),
-    prisma.loanTransaction.findMany({
-      select: { employeeId: true, amount: true, month: true, year: true },
-    }),
-    prisma.monthlyDeduction.findMany({
-      select: { employeeId: true, amount: true, month: true, year: true, type: true },
-    }),
-    prisma.appSetting.findUnique({ where: { key: "otp_bonus" } }),
-  ]);
-
+  // Get OTP bonus setting
+  const otpSetting = await prisma.appSetting.findUnique({ where: { key: "otp_bonus" } });
   const otpBonus = Number(otpSetting?.value) || 2;
 
-  // ─────────────────────────────────────────────────────────────
-  // BUCKET IN MEMORY
-  // ─────────────────────────────────────────────────────────────
+  const where: Record<string, unknown> = { active: true };
+  if (type) where.type = type;
 
-  // Sales by employee
-  const salesBy = new Map<string, { deliveries: number; otp: number; gross: number }>();
-  for (const s of salesThisMonth) {
-    if (!salesBy.has(s.employeeId)) salesBy.set(s.employeeId, { deliveries: 0, otp: 0, gross: 0 });
-    const b = salesBy.get(s.employeeId)!;
-    b.deliveries += s.nsDomCount;
-    b.otp += s.otpCount;
-    b.gross += s.nsDomCount * s.cylinderType.price + s.otpCount * otpBonus;
-  }
+  const employees = await prisma.employee.findMany({ where, orderBy: { name: "asc" } });
 
-  // Loans bucketed per employee as {total, prior, current}
-  const loansBy = new Map<string, { total: number; prior: number; current: number }>();
-  for (const l of allLoans) {
-    if (!loansBy.has(l.employeeId)) loansBy.set(l.employeeId, { total: 0, prior: 0, current: 0 });
-    const b = loansBy.get(l.employeeId)!;
-    b.total += l.amount;
-    const isPrior = l.year < year || (l.year === year && l.month < month);
-    const isCurrent = l.year === year && l.month === month;
-    if (isPrior) b.prior += l.amount;
-    if (isCurrent) b.current += l.amount;
-  }
+  const startDate = new Date(year, month - 1, 1);
+  const endDate = new Date(year, month, 0, 23, 59, 59);
 
-  // Deductions: bucketed per employee as {thisMonth: Record<type, amount>, priorInstalments}
-  const deductBy = new Map<string, { thisMonth: Record<string, number>; priorInstalments: number }>();
-  for (const d of allDeductions) {
-    if (!deductBy.has(d.employeeId)) deductBy.set(d.employeeId, { thisMonth: {}, priorInstalments: 0 });
-    const b = deductBy.get(d.employeeId)!;
-    const isCurrent = d.year === year && d.month === month;
-    const isPrior = d.year < year || (d.year === year && d.month < month);
-    if (isCurrent) {
-      b.thisMonth[d.type] = (b.thisMonth[d.type] || 0) + d.amount;
-    } else if (isPrior && d.type === "loan_instalment") {
-      b.priorInstalments += d.amount;
-    }
-  }
+  const salaryData = await Promise.all(
+    employees.map(async (emp) => {
+      let totalDeliveries = 0;
+      let totalOtpCount = 0;
+      let grossSalary = 0;
 
-  // ─────────────────────────────────────────────────────────────
-  // BUILD PER-EMPLOYEE RESULT
-  // ─────────────────────────────────────────────────────────────
-  const salaryData = employees.map((emp) => {
-    let totalDeliveries = 0;
-    let totalOtpCount = 0;
-    let grossSalary = 0;
+      if (emp.type === "delivery") {
+        // Get all delivery entries with cylinder type info
+        const deliveries = await prisma.dailyDelivery.findMany({
+          where: {
+            employeeId: emp.id,
+            date: { gte: startDate, lte: endDate },
+          },
+          include: { cylinderType: true },
+        });
 
-    if (emp.type === "delivery") {
-      const s = salesBy.get(emp.id);
-      if (s) {
-        totalDeliveries = s.deliveries;
-        totalOtpCount = s.otp;
-        grossSalary = s.gross;
+        for (const d of deliveries) {
+          totalDeliveries += d.count;
+          totalOtpCount += d.otpCount;
+          // Earnings: (count × cylinderType.price) + (otpCount × otpBonus)
+          grossSalary += (d.count * d.cylinderType.price) + (d.otpCount * otpBonus);
+        }
+      } else {
+        grossSalary = emp.fixedSalary;
       }
-    } else {
-      grossSalary = emp.fixedSalary;
-    }
 
-    const loans = loansBy.get(emp.id) || { total: 0, prior: 0, current: 0 };
-    const deducts = deductBy.get(emp.id) || { thisMonth: {}, priorInstalments: 0 };
+      // All loans ever given to this employee
+      const totalLoansEver = await prisma.loanTransaction.aggregate({
+        where: { employeeId: emp.id },
+        _sum: { amount: true },
+      });
 
-    const openingLoan = loans.prior - deducts.priorInstalments;
-    const additionalLoan = loans.current;
-    const netLoan = openingLoan + additionalLoan;
+      // Total loan repayments before this month
+      const priorRepayments = await prisma.monthlyDeduction.aggregate({
+        where: {
+          employeeId: emp.id,
+          type: "loan_instalment",
+          OR: [
+            { year: { lt: year } },
+            { year, month: { lt: month } },
+          ],
+        },
+        _sum: { amount: true },
+      });
 
-    const deductionMap = deducts.thisMonth;
-    const totalDeductions = Object.values(deductionMap).reduce((s, v) => s + v, 0);
-    const loanInstalment = deductionMap["loan_instalment"] || 0;
-    const loanCarryForward = netLoan - loanInstalment;
-    const netPayable = grossSalary - totalDeductions;
+      // Loans given before this month
+      const priorLoans = await prisma.loanTransaction.aggregate({
+        where: {
+          employeeId: emp.id,
+          OR: [
+            { year: { lt: year } },
+            { year, month: { lt: month } },
+          ],
+        },
+        _sum: { amount: true },
+      });
 
-    return {
-      employee: emp,
-      totalDeliveries,
-      totalOtpCount,
-      grossSalary,
-      openingLoan,
-      additionalLoan,
-      netLoan,
-      deductions: deductionMap,
-      totalDeductions,
-      netPayable,
-      loanCarryForward,
-      totalLoansEver: loans.total,
-    };
-  });
+      // Loans given this month
+      const currentMonthLoans = await prisma.loanTransaction.aggregate({
+        where: { employeeId: emp.id, month, year },
+        _sum: { amount: true },
+      });
+
+      const openingLoan =
+        (priorLoans._sum.amount || 0) - (priorRepayments._sum.amount || 0);
+      const additionalLoan = currentMonthLoans._sum.amount || 0;
+      const netLoan = openingLoan + additionalLoan;
+
+      // Deductions this month
+      const deductions = await prisma.monthlyDeduction.findMany({
+        where: { employeeId: emp.id, month, year },
+      });
+
+      const deductionMap: Record<string, number> = {};
+      let totalDeductions = 0;
+      for (const d of deductions) {
+        deductionMap[d.type] = d.amount;
+        totalDeductions += d.amount;
+      }
+
+      const loanInstalment = deductionMap["loan_instalment"] || 0;
+      const loanCarryForward = netLoan - loanInstalment;
+      const netPayable = grossSalary - totalDeductions;
+
+      return {
+        employee: emp,
+        totalDeliveries,
+        totalOtpCount,
+        grossSalary,
+        openingLoan,
+        additionalLoan,
+        netLoan,
+        deductions: deductionMap,
+        totalDeductions,
+        netPayable,
+        loanCarryForward,
+        totalLoansEver: totalLoansEver._sum.amount || 0,
+      };
+    })
+  );
 
   const totals = salaryData.reduce(
     (acc, s) => ({
@@ -147,10 +138,15 @@ export async function GET(request: NextRequest) {
       loanCarryForward: acc.loanCarryForward + s.loanCarryForward,
     }),
     {
-      totalDeliveries: 0, totalOtpCount: 0, grossSalary: 0,
-      totalDeductions: 0, netPayable: 0, openingLoan: 0,
-      additionalLoan: 0, loanCarryForward: 0,
-    },
+      totalDeliveries: 0,
+      totalOtpCount: 0,
+      grossSalary: 0,
+      totalDeductions: 0,
+      netPayable: 0,
+      openingLoan: 0,
+      additionalLoan: 0,
+      loanCarryForward: 0,
+    }
   );
 
   return NextResponse.json({ employees: salaryData, totals, otpBonus });

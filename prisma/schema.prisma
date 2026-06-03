@@ -39,6 +39,7 @@ model Employee {
   deductions      MonthlyDeduction[]
   sales           CylinderSale[]
   consumerRefills ConsumerRefill[]
+  deliveries      DailyDelivery[]
 }
 
 model CylinderType {
@@ -56,6 +57,7 @@ model CylinderType {
   consumers         Consumer[]
   refills           ConsumerRefill[]
   stockTransactions CylinderStockTransaction[]
+  deliveries        DailyDelivery[]
 }
 
 model AppSetting {
@@ -228,20 +230,20 @@ model CommercialTransaction {
 // ============================================================
 
 model Consumer {
-  id              String    @id @default(cuid())
-  consumerNumber  String?   @unique
-  bpclId          String?
-  name            String
-  phone           String    @default("")
-  address         String    @default("") @db.Text
-  area            String    @default("")
-  cylinderTypeId  String?
-  connectionDate  DateTime?
-  depositPaid     Float     @default(0)
-  active          Boolean   @default(true)
-  note            String    @default("") @db.Text
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  consumerNumber String?   @unique
+  bpclId         String?
+  name           String
+  phone          String    @default("")
+  address        String    @default("") @db.Text
+  area           String    @default("")
+  cylinderTypeId String?
+  connectionDate DateTime?
+  depositPaid    Float     @default(0)
+  active         Boolean   @default(true)
+  note           String    @default("") @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   cylinderType      CylinderType?              @relation(fields: [cylinderTypeId], references: [id])
   refills           ConsumerRefill[]
@@ -249,15 +251,15 @@ model Consumer {
 }
 
 model ConsumerRefill {
-  id              String       @id @default(cuid())
-  consumerId      String
-  date            DateTime
-  cylinderTypeId  String
-  paymentMode     String       @default("cash")
-  amount          Float        @default(0)
-  employeeId      String?
-  note            String       @default("") @db.Text
-  createdAt       DateTime     @default(now())
+  id             String   @id @default(cuid())
+  consumerId     String
+  date           DateTime
+  cylinderTypeId String
+  paymentMode    String   @default("cash")
+  amount         Float    @default(0)
+  employeeId     String?
+  note           String   @default("") @db.Text
+  createdAt      DateTime @default(now())
 
   consumer     Consumer     @relation(fields: [consumerId], references: [id], onDelete: Cascade)
   cylinderType CylinderType @relation(fields: [cylinderTypeId], references: [id])
@@ -268,19 +270,38 @@ model ConsumerRefill {
 }
 
 model CylinderStockTransaction {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   date           DateTime
   cylinderTypeId String
-  type           String       // purchase | delivery | empty_return | empty_dispatch | adjustment
-  fullDelta      Int          @default(0)
-  emptyDelta     Int          @default(0)
+  type           String // purchase | delivery | empty_return | empty_dispatch | adjustment
+  fullDelta      Int      @default(0)
+  emptyDelta     Int      @default(0)
   consumerId     String?
-  note           String       @default("") @db.Text
-  createdAt      DateTime     @default(now())
+  note           String   @default("") @db.Text
+  createdAt      DateTime @default(now())
 
   cylinderType CylinderType @relation(fields: [cylinderTypeId], references: [id])
   consumer     Consumer?    @relation(fields: [consumerId], references: [id])
 
   @@index([date])
   @@index([cylinderTypeId, date])
+}
+
+// ============================================================
+// LEGACY DAILY DELIVERY  (required by the reverted 6e11475 app)
+// Re-added on top of the MySQL schema so the older app works.
+// Created fresh & empty by `prisma db push` — additive, no data loss.
+// ============================================================
+
+model DailyDelivery {
+  id             String       @id @default(cuid())
+  employeeId     String
+  date           DateTime
+  cylinderTypeId String
+  count          Int          @default(0)
+  otpCount       Int          @default(0)
+  employee       Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  cylinderType   CylinderType @relation(fields: [cylinderTypeId], references: [id])
+
+  @@unique([employeeId, date, cylinderTypeId])
 }
